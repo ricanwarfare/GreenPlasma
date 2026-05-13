@@ -10,6 +10,9 @@
 // RESPONSIBLE DISCLOSURE: This PoC is for Microsoft MSRC submission only.
 // Do not use on systems you do not own or have authorization to test.
 
+#define UNICODE
+#define _UNICODE
+
 #include <iostream>
 #include <Windows.h>
 #include <winternl.h>
@@ -20,6 +23,11 @@
 #include <conio.h>
 #pragma comment(lib, "ntdll.lib")
 #pragma comment(lib, "advapi32.lib")
+
+// SECTION_INHERIT is defined in winnt.h but may not be available in all SDK versions
+#ifndef SECTION_INHERIT
+#define SECTION_INHERIT ULONG
+#endif
 
 // ============================================================================
 // NTDLL Undocumented Functions
