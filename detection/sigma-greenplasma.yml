@@ -1,0 +1,113 @@
+title: GreenPlasma CTFMON Arbitrary Section Creation EoP
+id: 7a3f2c8e-1b4d-4e8f-9c2a-6d5e8f1a2b3c
+status: experimental
+description: >
+  Detects exploitation of the GreenPlasma vulnerability (CTFMON Arbitrary Section Creation EoP).
+  A standard user creates an Object Manager symbolic link at the CTF AsmListCache path to redirect
+  ctfmon's section creation, then hijacks registry policy via CloudFiles symlink to escalate to SYSTEM.
+references:
+  - https://github.com/Nightmare-Eclipse/GreenPlasma
+author: Security Research
+date: 2026/05/13
+tags:
+  - attack.privilege_escalation
+  - attack.t1036  # Masquerading
+  - attack.t1112  # Modify Registry
+  - attack.t1574  # Hijack Execution Flow
+  - attack.t1055  # Process Injection
+logsource:
+  product: windows
+  service: sysmon
+detection:
+  selection_symlink_creation:
+    EventID: 1
+    Image|endswith:
+      - '\ctfmon.exe'
+    CommandLine|contains:
+      - 'NtCreateSymbolicLinkObject'
+  selection_registry_symlink:
+    EventID: 13  # Registry value set
+    TargetObject|contains:
+      - '\Software\Policies\Microsoft\CloudFiles\BlockedApps\SymbolicLinkValue'
+  selection_policy_hijack:
+    EventID: 13
+    TargetObject|contains:
+      - '\Software\Microsoft\Windows\CurrentVersion\Policies\System\DisableLockWorkstation'
+    Details: 'DWORD (0x00000001)'
+  selection_dacl_modify_cloudfiles:
+    EventID: 4663  # Object access
+    ObjectType: 'Key'
+    ObjectName|contains:
+      - '\Policies\Microsoft\CloudFiles'
+  selection_section_creation_dead:
+    EventID: 1
+    Image|endswith:
+      - '\ctfmon.exe'
+  selection_cfabort_call:
+    EventID: 1
+    Image|contains:
+      - 'cldapi.dll'
+  condition: selection_registry_symlink or selection_policy_hijack or (selection_dacl_modify_cloudfiles and selection_policy_hijack)
+falsepositives:
+  - Legitimate Cloud Files policy configuration (rare)
+  - Administrator-configured DisableLockWorkstation policy (should be documented)
+level: critical
+---
+title: GreenPlasma - Object Manager Symlink Detection
+id: 8b4f3d9e-2c5e-4f9a-0d3b-7e6a9d2c4e5f
+status: experimental
+description: >
+  Detects creation of NT Object Manager symbolic links at CTF AsmListCache paths,
+  which is the initial stage of the GreenPlasma exploit.
+references:
+  - https://github.com/Nightmare-Eclipse/GreenPlasma
+author: Security Research
+date: 2026/05/13
+tags:
+  - attack.privilege_escalation
+  - attack.t1574.012  # Hijack Execution Flow: COR_PROFILER
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: 4663
+    ObjectType: 'SymbolicLinkObject'
+    ObjectName|contains:
+      - 'CTF.AsmListCache.FMPWinlogon'
+  condition: selection
+falsepositives:
+  - Unknown legitimate use of CTF AsmListCache symlinks (none documented)
+level: high
+---
+title: GreenPlasma - Registry Link Creation for Policy Hijack
+id: 9c5d4e0f-3a6f-4b0a-1e4c-8f7b0e3d5a6b
+status: experimental
+description: >
+  Detects creation of registry symbolic links (REG_OPTION_CREATE_LINK) under
+  CloudFiles\BlockedApps, which is used in GreenPlasma to hijack policy evaluation.
+references:
+  - https://github.com/Nightmare-Eclipse/GreenPlasma
+author: Security Research
+date: 2026/05/13
+tags:
+  - attack.privilege_escalation
+  - attack.t1112  # Modify Registry
+  - attack.t1574  # Hijack Execution Flow
+logsource:
+  product: windows
+  service: sysmon
+detection:
+  selection_key_create:
+    EventID: 12  # Registry object created/deleted
+    TargetObject|contains:
+      - '\Software\Policies\Microsoft\CloudFiles\BlockedApps'
+    Details: 'KeyCreated'
+  selection_link_flag:
+    EventID: 12
+    TargetObject|contains:
+      - '\Software\Policies\Microsoft\CloudFiles\BlockedApps'
+  condition: selection_key_create
+falsepositives:
+  - Legitimate Cloud Files BlockedApps configuration (very rare)
+level: high

