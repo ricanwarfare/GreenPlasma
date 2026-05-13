@@ -10,9 +10,6 @@
 // RESPONSIBLE DISCLOSURE: This PoC is for Microsoft MSRC submission only.
 // Do not use on systems you do not own or have authorization to test.
 
-#define UNICODE
-#define _UNICODE
-
 #include <iostream>
 #include <Windows.h>
 #include <winternl.h>
@@ -25,8 +22,12 @@
 #pragma comment(lib, "advapi32.lib")
 
 // SECTION_INHERIT is defined in winnt.h but may not be available in all SDK versions
+// Define the enum values if missing (needed for NtMapViewOfSection)
 #ifndef SECTION_INHERIT
-#define SECTION_INHERIT ULONG
+typedef enum _SECTION_INHERIT {
+    ViewShare = 1,
+    ViewUnmap = 2
+} SECTION_INHERIT;
 #endif
 
 // ============================================================================
