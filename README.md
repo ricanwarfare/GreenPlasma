@@ -144,7 +144,7 @@ See `MITIGATION.md` for full hardening recommendations including:
 
 ## Responsible Disclosure
 
-This repository is for **security research, cyber exercises, and responsible disclosure** only. A report is being prepared for Microsoft MSRC.
+This repository is for **security research, cyber exercises, and responsible disclosure** only.
 
 **Do not use this exploit on systems you do not own or have authorization to test.**
 
