@@ -12,6 +12,8 @@
 
 #include <Windows.h>
 #include <Shellapi.h>
+#include <TlHelp32.h>
+#include <stdio.h>
 
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "shell32.lib")
@@ -86,9 +88,7 @@ BOOL SpawnSystemShell_CreateProcess() {
     si.wShowWindow = SW_SHOW;
 
     WCHAR cmdline[] = L"cmd.exe";
-    bResult = CreateProcessAsUser(
-        hDupToken,
-        NULL,           // Application name
+    bResult = CreateProcessAsUserW(
         cmdline,        // Command line (writable copy)
         NULL, NULL,      // Process/Thread security
         FALSE,           // Inherit handles
@@ -125,7 +125,7 @@ BOOL SpawnSystemShell_NamedPipe() {
 
     // Create a named pipe that SYSTEM services might connect to
     WCHAR pipeName[] = L"\\\\.\\pipe\\GreenPlasmaSystemPipe";
-    hPipe = CreateNamedPipe(
+    hPipe = CreateNamedPipeW(
         pipeName,
         PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
         PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
@@ -174,8 +174,7 @@ BOOL SpawnSystemShell_NamedPipe() {
                 si.wShowWindow = SW_SHOW;
 
                 WCHAR cmdline[] = L"cmd.exe";
-                bResult = CreateProcessAsUser(
-                    hDupToken, NULL, cmdline,
+                bResult = CreateProcessAsUserW(
                     NULL, NULL, FALSE, CREATE_NEW_CONSOLE,
                     NULL, NULL, &si, &pi);
 
@@ -217,15 +216,14 @@ BOOL SpawnSystemShell_Service() {
     }
 
     // Create service (will fail if it already exists, which is fine)
-    hService = CreateService(
-        hSCM, svcName, svcDisplay,
+    hService = CreateServiceW(
         SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS,
         SERVICE_DEMAND_START, SERVICE_ERROR_IGNORE,
         svcPath, NULL, NULL, NULL, NULL, NULL);
 
     if (!hService) {
         // Try to open existing service
-        hService = OpenService(hSCM, svcName, SERVICE_ALL_ACCESS);
+        hService = OpenServiceW(hSCM, svcName, SERVICE_ALL_ACCESS);
     }
 
     if (hService) {
