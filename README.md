@@ -54,8 +54,8 @@ Map SYSTEM Section → Write Payload → SYSTEM Shell
 > **Important:** The source files require Unicode (`W`) API variants. Both `UNICODE` and `_UNICODE` must be defined. The commands below include these flags. The `ntstatus.h` macro redefinition warnings are normal and harmless.
 
 ```batch
-:: Build the main exploit (required: UNICODE flags + ntdll.lib)
-cl /EHsc /DUNICODE /D_UNICODE /std:c++17 /Fe:GreenPlasma.exe PoC.cpp /link ntdll.lib advapi32.lib
+:: Build the main exploit (required: UNICODE flags + all libs)
+cl /EHsc /DUNICODE /D_UNICODE /std:c++17 /Fe:GreenPlasma.exe PoC.cpp /link ntdll.lib advapi32.lib user32.lib shell32.lib
 
 :: Build the payload DLL (for section hijack weaponization)
 cl /EHsc /DUNICODE /D_UNICODE /LD /Fe:greenplasma_payload.dll payload.cpp /link advapi32.lib shell32.lib
