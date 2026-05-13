@@ -51,16 +51,22 @@ Map SYSTEM Section → Write Payload → SYSTEM Shell
 
 ### Build
 
+> **Important:** The source files require Unicode (`W`) API variants. Both `UNICODE` and `_UNICODE` must be defined. The commands below include these flags. The `ntstatus.h` macro redefinition warnings are normal and harmless.
+
 ```batch
-:: Build the main exploit
-cl /EHsc /std:c++17 PoC.cpp /link ntdll.lib advapi32.lib
+:: Build the main exploit (required: UNICODE flags + ntdll.lib)
+cl /EHsc /DUNICODE /D_UNICODE /std:c++17 /Fe:GreenPlasma.exe PoC.cpp /link ntdll.lib advapi32.lib
 
 :: Build the payload DLL (for section hijack weaponization)
-cl /EHsc /LD /Fe:greenplasma_payload.dll payload.cpp /link advapi32.lib shell32.lib
+cl /EHsc /DUNICODE /D_UNICODE /LD /Fe:greenplasma_payload.dll payload.cpp /link advapi32.lib shell32.lib
 
 :: OR build payload as standalone EXE (for independent testing)
-cl /EHsc /DSTANDALONE_EXE /Fe:greenplasma_payload.exe payload.cpp /link advapi32.lib shell32.lib
+cl /EHsc /DUNICODE /D_UNICODE /DSTANDALONE_EXE /Fe:greenplasma_payload.exe payload.cpp /link advapi32.lib shell32.lib
 ```
+
+> **Note:** The payload EXE requires SYSTEM privileges to spawn a shell. Running it as a standard user will simply report all three techniques failed and exit with code 1. The payload is designed to be loaded by the exploit via section hijack — use the PoC for actual privilege escalation.
+
+> **Note:** The named pipe technique (Technique 2) has a 5-second timeout. If it doesn't connect in 5 seconds, it skips to Technique 3 (service-based). This prevents the payload from hanging indefinitely.
 
 ### Deploy
 
